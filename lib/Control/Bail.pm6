@@ -32,10 +32,13 @@
 
 Using this module adds three control statements to Perl6 syntax:
 
-The C<bail> statement places the block following it onto the
-C<LEAVE> queue, like the C<UNDO> phaser.   Unlike the C<UNDO> phaser,
-it does so at runtime, and so nothing is placed on the UNDO queue
-unless control flow actually reaches the C<bail> statement.
+The C<bail> statement places the closure following it onto the
+C<LEAVE> queue, like the C<UNDO> phaser -- the closures will
+be run only if the current block exits unsuccessfully.
+
+Unlike the C<UNDO> phaser, it does so at runtime, and so closures
+are not placed on the C<LEAVE> queue unless control flow actually
+reaches the C<bail> statement.
 
 This allows nested allocations of resources to be released in
 an orderly fashion, without repeating yourself, with no deep block
@@ -43,9 +46,11 @@ nesting and with deallocation code placed next to the corresponding
 allocation code.
 
 The C<trail> statement is the same, but places the closure on the
-LEAVE queue.  The C<trail-keep> is probably not very useful, but is
-included for completeness.  It is the same, but places the closure
-on the C<KEEP> queue.
+C<LEAVE> queue as a plain <LEAVE> phaser would do (it always runs,
+whether the block exits successfully or not.)  The C<trail-keep>
+is probably not very useful, but is included for completeness. 
+It is the same, but places the closure as the C<KEEP> phaser would
+do (it runs only when the block exits successfully.)
 
 =end DESCRIPTION
 
