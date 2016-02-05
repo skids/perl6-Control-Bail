@@ -104,6 +104,12 @@ respectively.
 
 ## Status
 
+NOTE: This is currently not working for blocks evaluated multiple times,
+as the phasers are not cleared when blocks ae re-entered and they just
+stack up.  You can try it out on simple stuff but it will not be very
+useful in actual code.  There are some ... challenges ... to overcome
+to fix this.  Working on that.
+
 Brand spanking new.  The names of the provided functions may end up
 being capitalized or perhaps changed entirely.  Let the bikeshedding
 commence.  Also, this module uses a lot of metamodel/internal stuff that
