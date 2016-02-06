@@ -4,7 +4,7 @@ use lib <blib/lib lib>;
 
 use Test;
 
-plan 8;
+plan 11;
 
 use Control::Bail;
 
@@ -58,12 +58,33 @@ sub normal_return_2trail {
 }
 normal_return_2trail();
 is $*d, "21", "trail lifo";
+$*d = "";
+normal_return_2trail();
+is $*d, "21", "trail does not stack in subs";
 
-# Really this is just testing the leave queue itself but JIC
 $*d = '';
 sub normal_return_trail_LEAVE {
     LEAVE { $*d ~= '1' };
     trail { $*d ~= '2' };
+    LEAVE { $*d ~= '3' };
 }
 normal_return_trail_LEAVE();
-is $*d, "21", "trail plus LEAVE lifo";
+is $*d, "321", "trail plus LEAVE lifo";
+
+$*d = "";
+for 0..2 {
+    LEAVE { $*d ~= '1' };
+    trail { $*d ~= '2' };
+    LEAVE { $*d ~= '3' };
+}
+is $*d, "321321321", "trail does not stack in loops";
+
+$*d = "";
+my &d = {
+    LEAVE { $*d ~= '1' };
+    trail { $*d ~= '2' };
+    LEAVE { $*d ~= '3' };
+}
+&d();
+&d();
+is $*d, "321321", "trail does not stack in closures";

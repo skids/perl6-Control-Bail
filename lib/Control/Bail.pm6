@@ -8,6 +8,8 @@
     # ...then...
     # The Receiver gets an icepack, but only if he was tackled.
     # ...then...
+    # A streaker runs across the field, no matter what.
+    # ...then...
     # The Receiver always gets juice, unless the QB was sacked.
     # ...then...
     # The QB always gets taunted, unless there was a touchdown.
@@ -18,6 +20,7 @@
         bail { say "Taunt the QB" }
         Bool.pick or die "sacked!";
         trail { say "Bring Receiver juice" }
+        LEAVE { say "Streaker runs across field" }
         bail { say "Bring Receiver icepack" }
         Bool.pick or die "tackled!";
         say "touchdown!";
@@ -36,14 +39,22 @@ The C<bail> statement places the closure following it onto the
 C<LEAVE> queue, like the C<UNDO> phaser -- the closures will
 be run only if the current block exits unsuccessfully.
 
-Unlike the C<UNDO> phaser, it does so at runtime, and so closures
-are not placed on the C<LEAVE> queue unless control flow actually
-reaches the C<bail> statement.
+Unlike the C<UNDO> phaser, the closures will not actually run
+unless control flow actually reaches the C<bail> statement at
+runtime.  Order with respect to normal C<LEAVE/KEEP/UNDO>
+statements is still preserved.  A C<bail> statement is roughly
+equivalent to:
+
+    my $run-this = False;
+    $run-this = True;
+    UNDO { if $run-this { ... } }
 
 This allows nested allocations of resources to be released in
 an orderly fashion, without repeating yourself, with no deep block
 nesting and with deallocation code placed next to the corresponding
-allocation code.
+allocation code.  It is a bit like the "defer" statement in go
+and swift, but with the added feature that it automatically
+cancels itself if the block is left normally.
 
 The C<trail> statement is the same, but places the closure on the
 C<LEAVE> queue as a plain <LEAVE> phaser would do (it always runs,
@@ -73,48 +84,84 @@ sub EXPORT(|) {
     }
     role Control::Bail {
         rule statement_control:sym<bail> {
-            <sym><.kok> <blorst> { 
-                 # TODO We actually only need to do this for the first bail statement
-                 $*W.add_phaser($/, 'LEAVE', -> { });
-            }
+            <sym><.kok> <blorst>
         }
         rule statement_control:sym<trail> {
-            <sym><.kok> <blorst> { 
-                 # TODO We actually only need to do this for the first bail statement
-                 $*W.add_phaser($/, 'LEAVE', -> { });
-            }
+            <sym><.kok> <blorst>
         }
         rule statement_control:sym<trail-keep> {
-            <sym><.kok> <blorst> { 
-                 # TODO We actually only need to do this for the first bail statement
-                 $*W.add_phaser($/, 'LEAVE', -> { });
-            }
+            <sym><.kok> <blorst>
         }
     }
     role Control::Bail::Actions {
         method statement_control:sym<bail> (|c) {
-            c[0].make(
-                QAST::Op.new(:op<callmethod>, :name<add_phaser>,
-                QAST::Op.new(:op<getcodeobj>, QAST::Op.new(:op<curcode>)),
-                QAST::SVal.new(:value<UNDO>),
-                lk(c[0],'blorst').ast
-            ))
+            $/ := c[0];
+
+            my $switch := QAST::Node.unique('runtime_leave');
+            my $block := QAST::Block.new(
+                 QAST::Stmts.new(
+                      QAST::Op.new(:op<if>, QAST::Var.new( :name($switch), :scope<lexical>),
+                          QAST::Op.new(:op<call>, lk($/,'blorst').ast))
+                 )
+            );
+            nqp::atpos($*W.cur_lexpad(),0).push($block); # Should we?  Should we pop it after?
+            my $sig := $*W.create_signature(nqp::hash('parameter_objects', nqp::list()));
+            my $code := $*W.stub_code_object('Block');
+            $*W.attach_signature($code, $sig);
+            $*W.finish_code_object($code, $block);
+            $*W.add_phaser($/, 'UNDO', $code);
+            $/.make(
+                QAST::Stmts.new(
+                    QAST::Var.new(:name($switch), :scope<lexical>, :decl<var>),
+                    QAST::Op.new(:op<bind>, QAST::Var.new(:name($switch), :scope<lexical>), QAST::WVal.new(:value(1)))
+                )
+            )
         }
         method statement_control:sym<trail> (|c) {
-            c[0].make(
-                QAST::Op.new(:op<callmethod>, :name<add_phaser>,
-                QAST::Op.new(:op<getcodeobj>, QAST::Op.new(:op<curcode>)),
-                QAST::SVal.new(:value<LEAVE>),
-                lk(c[0],'blorst').ast
-            ))
+            $/ := c[0];
+
+            my $switch := QAST::Node.unique('runtime_leave');
+            my $block := QAST::Block.new(
+                 QAST::Stmts.new(
+                      QAST::Op.new(:op<if>, QAST::Var.new( :name($switch), :scope<lexical>),
+                          QAST::Op.new(:op<call>, lk($/,'blorst').ast))
+                 )
+            );
+            nqp::atpos($*W.cur_lexpad(),0).push($block); # Should we?  Should we pop it after?
+            my $sig := $*W.create_signature(nqp::hash('parameter_objects', nqp::list()));
+            my $code := $*W.stub_code_object('Block');
+            $*W.attach_signature($code, $sig);
+            $*W.finish_code_object($code, $block);
+            $*W.add_phaser($/, 'LEAVE', $code);
+            $/.make(
+                QAST::Stmts.new(
+                    QAST::Var.new(:name($switch), :scope<lexical>, :decl<var>),
+                    QAST::Op.new(:op<bind>, QAST::Var.new(:name($switch), :scope<lexical>), QAST::WVal.new(:value(1)))
+                )
+            )
         }
         method statement_control:sym<trail-keep> (|c) {
-            c[0].make(
-                QAST::Op.new(:op<callmethod>, :name<add_phaser>,
-                QAST::Op.new(:op<getcodeobj>, QAST::Op.new(:op<curcode>)),
-                QAST::SVal.new(:value<KEEP>),
-                lk(c[0],'blorst').ast
-            ))
+            $/ := c[0];
+
+            my $switch := QAST::Node.unique('runtime_leave');
+            my $block := QAST::Block.new(
+                 QAST::Stmts.new(
+                      QAST::Op.new(:op<if>, QAST::Var.new( :name($switch), :scope<lexical>),
+                          QAST::Op.new(:op<call>, lk($/,'blorst').ast))
+                 )
+            );
+            nqp::atpos($*W.cur_lexpad(),0).push($block); # Should we?  Should we pop it after?
+            my $sig := $*W.create_signature(nqp::hash('parameter_objects', nqp::list()));
+            my $code := $*W.stub_code_object('Block');
+            $*W.attach_signature($code, $sig);
+            $*W.finish_code_object($code, $block);
+            $*W.add_phaser($/, 'KEEP', $code);
+            $/.make(
+                QAST::Stmts.new(
+                    QAST::Var.new(:name($switch), :scope<lexical>, :decl<var>),
+                    QAST::Op.new(:op<bind>, QAST::Var.new(:name($switch), :scope<lexical>), QAST::WVal.new(:value(1)))
+                )
+            )
         }
     }
     nqp::bindkey(%*LANG, 'MAIN', %*LANG<MAIN>.HOW.mixin(%*LANG<MAIN>, Control::Bail));
