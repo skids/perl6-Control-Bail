@@ -63,6 +63,10 @@ is probably not very useful, but is included for completeness.
 It is the same, but places the closure as the C<KEEP> phaser would
 do (it runs only when the block exits successfully.)
 
+A C<trail-undo> and C<trail-leave> statement are also provided.
+They are synonyms for C<bail> and C<trail> respectively, just for
+the sake of naming preferences.
+
 =end DESCRIPTION
 
 =AUTHOR Brian S. Julin
@@ -92,11 +96,16 @@ sub EXPORT(|) {
         rule statement_control:sym<trail-keep> {
             <sym><.kok> <blorst>
         }
+        rule statement_control:sym<trail-undo> {
+            <sym><.kok> <blorst>
+        }
+        rule statement_control:sym<trail-leave> {
+            <sym><.kok> <blorst>
+        }
     }
     role Control::Bail::Actions {
-        method statement_control:sym<bail> (|c) {
+        sub add_phaser($cond, |c) {
             $/ := c[0];
-
             my $switch := QAST::Node.unique('runtime_leave');
             my $block := QAST::Block.new(
                  QAST::Stmts.new(
@@ -109,60 +118,31 @@ sub EXPORT(|) {
             my $code := $*W.stub_code_object('Block');
             $*W.attach_signature($code, $sig);
             $*W.finish_code_object($code, $block);
-            $*W.add_phaser($/, 'UNDO', $code);
+            $*W.add_phaser($/, $cond, $code);
             $/.make(
                 QAST::Stmts.new(
                     QAST::Var.new(:name($switch), :scope<lexical>, :decl<var>),
                     QAST::Op.new(:op<bind>, QAST::Var.new(:name($switch), :scope<lexical>), QAST::WVal.new(:value(1)))
                 )
             )
+        }
+        method statement_control:sym<bail> (|c) {
+            add_phaser('UNDO', c[0]);
         }
         method statement_control:sym<trail> (|c) {
-            $/ := c[0];
-
-            my $switch := QAST::Node.unique('runtime_leave');
-            my $block := QAST::Block.new(
-                 QAST::Stmts.new(
-                      QAST::Op.new(:op<if>, QAST::Var.new( :name($switch), :scope<lexical>),
-                          QAST::Op.new(:op<call>, lk($/,'blorst').ast))
-                 )
-            );
-            nqp::atpos($*W.cur_lexpad(),0).push($block); # Should we?  Should we pop it after?
-            my $sig := $*W.create_signature(nqp::hash('parameter_objects', nqp::list()));
-            my $code := $*W.stub_code_object('Block');
-            $*W.attach_signature($code, $sig);
-            $*W.finish_code_object($code, $block);
-            $*W.add_phaser($/, 'LEAVE', $code);
-            $/.make(
-                QAST::Stmts.new(
-                    QAST::Var.new(:name($switch), :scope<lexical>, :decl<var>),
-                    QAST::Op.new(:op<bind>, QAST::Var.new(:name($switch), :scope<lexical>), QAST::WVal.new(:value(1)))
-                )
-            )
+            add_phaser('LEAVE', c[0]);
+        }
+        method statement_control:sym<trail-undo> (|c) {
+            add_phaser('UNDO', c[0]);
         }
         method statement_control:sym<trail-keep> (|c) {
-            $/ := c[0];
-
-            my $switch := QAST::Node.unique('runtime_leave');
-            my $block := QAST::Block.new(
-                 QAST::Stmts.new(
-                      QAST::Op.new(:op<if>, QAST::Var.new( :name($switch), :scope<lexical>),
-                          QAST::Op.new(:op<call>, lk($/,'blorst').ast))
-                 )
-            );
-            nqp::atpos($*W.cur_lexpad(),0).push($block); # Should we?  Should we pop it after?
-            my $sig := $*W.create_signature(nqp::hash('parameter_objects', nqp::list()));
-            my $code := $*W.stub_code_object('Block');
-            $*W.attach_signature($code, $sig);
-            $*W.finish_code_object($code, $block);
-            $*W.add_phaser($/, 'KEEP', $code);
-            $/.make(
-                QAST::Stmts.new(
-                    QAST::Var.new(:name($switch), :scope<lexical>, :decl<var>),
-                    QAST::Op.new(:op<bind>, QAST::Var.new(:name($switch), :scope<lexical>), QAST::WVal.new(:value(1)))
-                )
-            )
+            add_phaser('KEEP', c[0]);
         }
+        method statement_control:sym<trail-leave> (|c) {
+            add_phaser('LEAVE', c[0]);
+        }
+
+
     }
     nqp::bindkey(%*LANG, 'MAIN', %*LANG<MAIN>.HOW.mixin(%*LANG<MAIN>, Control::Bail));
     nqp::bindkey(%*LANG, 'MAIN-actions', %*LANG<MAIN-actions>.HOW.mixin(%*LANG<MAIN-actions>, Control::Bail::Actions));
